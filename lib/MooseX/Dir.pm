@@ -1,8 +1,8 @@
-package Fuse::Dir;
+package MooseX::Fuse::Dir;
 
 
-use Moose;
-extends 'Fuse::Node';
+use Moose::Role;
+extends 'MooseX::Fuse::Node';
 
 no Moose;
 1;

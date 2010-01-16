@@ -1,8 +1,9 @@
-package Fuse::File;
+package MooseX::Fuse::File;
 
-use strict;
-use warnings;
+use Moose::Role;
 
-use base 'Fuse::Node';
+extends 'MooseX::Fuse::Node';
+
+
 
 1;

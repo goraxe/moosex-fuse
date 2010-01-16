@@ -1,4 +1,4 @@
-package Fuse::Node;
+package MooseX::Fuse::Node;
 
 use Moose;
 
@@ -142,6 +142,9 @@ my $mode_shift = {
 #	
 #}
 
+
+# support adding just by name
+# TODO review if this makes sense
 sub BUILDARGS {
 	my $class = shift;
 	if ( @_ == 1 && not ref $_[0] ) {

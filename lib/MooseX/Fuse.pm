@@ -1,4 +1,4 @@
-package Fuse::Fs;
+package MooseX::Fuse;
 
 #use strict;
 #use warnings;
@@ -8,9 +8,9 @@ package Fuse::Fs;
 
 use Moose;
 
-use Fuse::Dir;
+use MooseX::Dir;
 
-extends 'Fuse::Node';
+extends 'MooseX::Node';
 
 
 #sub new {
@@ -66,4 +66,6 @@ sub path_exists {
 }
 
 
+
+no Moose;
 1;

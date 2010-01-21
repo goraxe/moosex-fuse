@@ -8,24 +8,91 @@ package MooseX::Fuse;
 
 use Moose;
 
-use MooseX::Dir;
+use MooseX::Fuse::Dir;
+use MooseX::Fuse::File;
 
-extends 'MooseX::Node';
+use POSIX qw(ENOENT);
+
+#use MooseX::Types;
+use MooseX::Fuse::Types;
+use MooseX::Types::Path::Class qw(Dir File);
+
+use Log::Log4perl qw(:easy);
+
+with 'MooseX::Log::Log4perl::Easy';
+with 'MooseX::Fuse::Node';
+
+BEGIN {
+    Log::Log4perl->easy_init();
+}
 
 
-#sub new {
-#	my $class= shift;
-#	my $opts = {@_};
-#	$opts->{name} = ".";
-##	my $self = $class->SUPER::new(%$opts);
+use Fuse;
 
-#	return bless($self, $class);
+has mountpoint => (
+    is         => 'ro',
+    isa        => Dir,
+    required   => 1,
+    coerce     => 1,
+);
 
-#}
+has '+type' => (
+    default => S_IFDIR
+);
+
 
 has '+name' => (
-	default => '/',
+	default => '/' ,
 );
+
+
+sub BUILD {
+    my ($self ) = @_;
+    $self->add_node($self); #, {name => '/' });
+}
+
+sub mount {
+    my ($self) = @_;
+
+    Fuse::main(
+          mountpoint    => $self->mountpoint,
+          getdir        => sub { $self->getdir(@_); },
+          getattr       => sub { $self->getattr(@_); },
+          statfs        => sub { $self->statfs(@_); },
+          open          => sub { $self->open(@_); },
+          read          => sub { $self->read(@_); },
+    );
+}
+
+sub getdir {
+    my ($self, $dir) = @_;
+    $self->log_debug("getdir called with: $dir");
+}
+
+sub getattr {
+    my ($self, $file) = @_;
+    $self->log_debug("get attr called with: $file");
+    my $node = $self->get_node($file);
+    return -ENOENT() unless defined $node;
+    # else return the files stat
+    return $node->stat;
+}
+
+sub statfs {
+    my ($self) = @_;
+    $self->log_debug("statfs called");
+}
+
+sub open {
+    my ($self, $file) = @_;
+    $self->log_debug("open called with file: $file");
+}
+
+sub read {
+    my ($self, $file) = @_;
+    $self->log_debug("read called with file: $file");
+
+}
 
 sub create_path {
 	my $self = shift;

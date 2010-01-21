@@ -1,18 +1,39 @@
 package MooseX::Fuse::Node;
 
-use Moose;
+#use Moose;
+use Moose::Role;
 
+with 'MooseX::Log::Log4perl::Easy';
 
 use Carp qw(croak carp);
-
+use POSIX qw(ENOENT);
 use Data::Dumper;
+
+use constant {
+	S_IFMT  => 0170000,
+	S_IFSOCK=> 0140000,
+	S_IFLNK => 0120000,
+	S_IFREG => 0100000,
+	S_IFBLK => 0060000,
+	S_IFDIR => 0040000,
+	S_IFCHR => 0020000,
+	S_IFIFO => 0010000,
+	S_ISUID => 0004000,
+	S_ISGID => 0002000,
+	S_ISVTX => 0001000,
+};
 
 has name => (
 	is	=> 'ro',
 	isa	=> 'Str',
 );
 
-has 'Dev' => (
+has parent => (
+    is  => 'rw',
+    isa => 'MooseX::Fuse::Node',
+);
+
+has 'dev' => (
 	is	=>	'ro',
 	isa	=>	'Int',
 	default	=>	0
@@ -85,15 +106,20 @@ has 'ctime' => (
 );
 
 has 'size' => (
-	is	=>	'ro',
+	is	=>	'rw',
 	isa	=>	'Int',
 	default	=>	0
 );
 
+has mode => (
+    is => 'rw',
+    isa => 'Int',
+    default => 0755,
+);
 
 has nodes => (
 	is	=> 'ro',
-	isa	=> 'HashRef[Fuse::Node]',
+	isa	=> 'HashRef[MooseX::Fuse::Node]',
 	lazy_build => 1
 );
 
@@ -101,19 +127,16 @@ sub _build_nodes {
 	return {};
 }
 
-my $mode_shift = {
-	S_IFMT  => 0170000,
-	S_IFSOCK=> 0140000,
-	S_IFLNK => 0120000,
-	S_IFREG => 0100000,
-	S_IFBLK => 0060000,
-	S_IFDIR => 0040000,
-	S_IFCHR => 0020000,
-	S_IFIFO => 0010000,
-	S_ISUID => 0004000,
-	S_ISGID => 0002000,
-	S_ISVTX => 0001000,
-};
+has modes => (
+    is  => 'ro',
+    lazy_build => 1,
+);
+
+
+sub _build_modes {
+    my ($self) = @_;
+    return ($self->type << 9) + $self->mode;
+}
 
 #sub new {
 #	my $class = shift;
@@ -143,58 +166,68 @@ my $mode_shift = {
 #}
 
 
+sub stat {
+    my ($self) = @_;
+    return ($self->dev,$self->inode,$self->modes,$self->nlink,$self->uid,$self->gid,$self->rdev,$self->size,$self->atime,$self->mtime,$self->ctime,$self->blksize,$self->blocks);
+}
+
 # support adding just by name
 # TODO review if this makes sense
-sub BUILDARGS {
+around  BUILDARGS => sub {
+    my $orig = shift;
 	my $class = shift;
 	if ( @_ == 1 && not ref $_[0] ) {
 		return { name => $_[0] };
 	} else {
-		return $class->SUPER::BUILDARGS(@_);
+		return &$orig($class,@_);
 	}
-}
+};
 
 sub add_node {
-	my $self = shift;
-	my $node = shift;
-	$node->{parent} = $self;
-	die unless defined ($node->does('Fuse::Node'));
-	$self->nodes->{$node->{name}} = $node;
+	my ($self,$node, %args) = @_;
+    
+    $self->log_debug("add_node called with $node");
+    return if not defined $node; 
+    my $name = $args{name} || $node->name;
+
+	$node->parent($self);
+	die unless defined ($node->does('MooseX::Fuse::Node'));
+	$self->nodes->{$name} = $node;
 	return $node;
 }
 
 sub get_node {
 	my ($self, $node) = @_;
-	return unless $self->has_nodes;
+	return  unless $self->has_nodes;
 
 	my $paths;
-	warn "translating $node";
+	$self->log_debug ("translating $node");
 	if (not ref $node) {
-
 		$paths = $self->path_split($node);
 	} elsif (ref ($node) eq 'ARRAY')  {
 		$paths = $node;
 	} else {
 		die "unknown path type ". ref $node;
 	}
-	warn "paths contains " . Dumper $paths;
+	$self->log_debug("paths contains " . Dumper ($paths));
 	my $path  = shift @$paths;
-	warn "looking up $path";
+	$self->log_debug("looking up $path");
 	return if (not defined $path);
 
 	# if non existant path return
 #	return if (not defined ($self->nodes()->{$path}));
 
-	# recurse the call if we have more to drill down
-	if (@$paths > 0 ) {
-		return $self->nodes->{$path}->get_node($path);
-	} elsif ( @$paths == 0 && $path eq $self->name() ) {
-		return $self;
+    # recurse the call if we have more to drill down
+    my $nodes = $self->nodes();
+    my $child_node = $nodes->{$path};
+    return  unless defined $child_node;
+    if (@$paths > 0 ) {
+        return $child_node->get_node(join "/", @$paths);
+    }
+    else {
+        $self->log_debug("found node and returning it");
+		return $child_node;
 	}
-	warn "ookay my name is " . $self->name();
-
-	# else we should have the node (or not) so return it
-	return $self->nodes->{$node};
 }
 
 
@@ -205,12 +238,10 @@ sub node_exists {
 
 sub path_split {
 	my ($self, $path) = @_;
-#	return wantarray ? ("/") : ["/"] if ($path eq "/") ;
+
+	return wantarray ? ("/") : ["/"] if ($path eq "/") ;
 
 	my @path = split /\//, $path;
-	if (@path && $path[0] eq "") {
-		$path[0] = '/';
-	};
 #	unshift @path, "/";
 	return wantarray ?  @path : \@path;
 }

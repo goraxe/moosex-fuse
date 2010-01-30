@@ -1,3 +1,4 @@
+# vim: et
 package MooseX::Fuse;
 
 #use strict;
@@ -8,8 +9,8 @@ package MooseX::Fuse;
 
 use Moose;
 
-use MooseX::Fuse::Dir;
-use MooseX::Fuse::File;
+with 'MooseX::Fuse::Dir';
+#use MooseX::Fuse::File;
 
 use POSIX qw(ENOENT);
 
@@ -18,6 +19,8 @@ use MooseX::Fuse::Types;
 use MooseX::Types::Path::Class qw(Dir File);
 
 use Log::Log4perl qw(:easy);
+
+use Data::Dumper;
 
 with 'MooseX::Log::Log4perl::Easy';
 with 'MooseX::Fuse::Node';
@@ -37,7 +40,7 @@ has mountpoint => (
 );
 
 has '+type' => (
-    default => S_IFDIR
+    default => sub {  return S_IFDIR;}
 );
 
 
@@ -46,35 +49,62 @@ has '+name' => (
 );
 
 
-sub BUILD {
-    my ($self ) = @_;
-    $self->add_node($self); #, {name => '/' });
-}
+#sub BUILD {
+#    my ($self ) = @_;
+#    $self->add_node($self); #, {name => '/' });
+#}
 
 sub mount {
     my ($self) = @_;
 
     Fuse::main(
           mountpoint    => $self->mountpoint,
-          getdir        => sub { $self->getdir(@_); },
-          getattr       => sub { $self->getattr(@_); },
+          getdir        => sub { $self->get_dir(@_); },
+          getattr       => sub { $self->get_attr(@_); },
           statfs        => sub { $self->statfs(@_); },
           open          => sub { $self->open(@_); },
           read          => sub { $self->read(@_); },
     );
+    return 1;
 }
 
-sub getdir {
+sub get_dir {
     my ($self, $dir) = @_;
     $self->log_debug("getdir called with: $dir");
+    my $node = $self->get_node($dir);
+    # for the moment special case . and ..
+    return ('.', '..', $node->children); # unless $self->has_nodes();
 }
 
-sub getattr {
+sub get_node {
+    my ($self, $path) = @_;
+    $self->log_debug("get_node called with: $path");
+    my @paths = $self->path_split($path);
+
+    # handle special case where looking for root element
+    if (@paths == 1 ) {
+        $self->log_debug("get_node returning self ($self)");
+        return $self;
+    } 
+
+    my $node = $self;
+    shift @paths; # remove leading /
+    # walk the tree 
+    foreach my $p (@paths) {
+        $node = $node->get($p);
+    }
+    $self->log_debug("get_node returning node " . ( defined $node ? $node->name() : " not found ") );
+    return $node;
+}
+
+sub get_attr {
     my ($self, $file) = @_;
     $self->log_debug("get attr called with: $file");
+
     my $node = $self->get_node($file);
     return -ENOENT() unless defined $node;
     # else return the files stat
+    $self->log_debug("returning node stat " . Dumper($node->stat));
     return $node->stat;
 }
 
@@ -133,6 +163,15 @@ sub path_exists {
 }
 
 
+sub path_split {
+	my ($self, $path) = @_;
+
+	return wantarray ? ("/") : ["/"] if ($path eq "/") ;
+
+	my @path = split /\//, $path;
+#	unshift @path, "/";
+	return wantarray ?  @path : \@path;
+}
 
 no Moose;
 1;
